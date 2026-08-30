@@ -1,0 +1,5 @@
+strategy,ann_return,ann_vol,sharpe,max_drawdown,hit_rate
+Momentum L/S (D10-D1),0.0423,0.1535,0.2754,-0.2701,0.5352
+Top decile (long only),0.1603,0.1388,1.1543,-0.1725,0.6197
+Bottom decile (long only),0.0911,0.1952,0.4665,-0.3426,0.6056
+Equal-weight universe (benchmark),0.1279,0.1247,1.0253,-0.1853,0.6197
