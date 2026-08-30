@@ -1,0 +1,5 @@
+,ann_return,ann_vol,sharpe,max_drawdown
+Min-Variance,0.0662,0.0737,0.6278,-0.0803
+Max-Sharpe (tangency),0.1894,0.1911,0.8866,-0.2643
+Equal-Weight,0.1697,0.1418,1.0557,-0.175
+Risk-Parity,0.106,0.0976,0.8809,-0.1099

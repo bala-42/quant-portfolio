@@ -1,0 +1,10 @@
+metric,value
+cointegration_pvalue,0.40890511972909493
+adf_pvalue,0.19574776106388236
+hedge_ratio_beta,0.5479577424440317
+ann_return_net,-0.4038939482328993
+ann_vol_net,0.6213757655468108
+sharpe_net,-0.6499995182101647
+max_drawdown,-0.9289299818217779
+n_position_changes,68.0
+pct_time_in_market,0.4401574803149606
