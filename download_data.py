@@ -22,6 +22,23 @@ SOURCES = {
         "https://raw.githubusercontent.com/blockchain-unica/ethereum-ponzi/master/price-eth-usd.csv",
     "data/fx_daily.csv":
         "https://raw.githubusercontent.com/datasets/exchange-rates/main/data/daily.csv",
+    # Broader crypto universe used by the pairs-trading pair scan
+    # (02_crypto_stat_arb) to find a genuinely cointegrated pair, rather
+    # than assuming BTC/ETH is one.
+    "data/bitcoin.csv":
+        "https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Cryptocurrency/bitcoin.csv",
+    "data/litecoin.csv":
+        "https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Cryptocurrency/litecoin.csv",
+    "data/ethereum.csv":
+        "https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Cryptocurrency/ethereum.csv",
+    "data/xrp.csv":
+        "https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Cryptocurrency/xrp.csv",
+    "data/dogecoin.csv":
+        "https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Cryptocurrency/dogecoin.csv",
+    "data/chainlink.csv":
+        "https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Cryptocurrency/chainlink.csv",
+    "data/cardano.csv":
+        "https://raw.githubusercontent.com/MainakRepositor/Datasets/master/Cryptocurrency/cardano.csv",
 }
 
 def main():
