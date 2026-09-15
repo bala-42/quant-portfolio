@@ -53,15 +53,26 @@ def efficient_frontier(mu: np.ndarray, cov: np.ndarray, n_points: int = 40,
                         long_only: bool = True) -> tuple:
     """
     Trace the efficient frontier by solving a min-variance QP at each of
-    `n_points` target return levels between the lowest and highest asset
-    expected returns.
+    `n_points` target return levels spanning the asset expected returns.
+
+    The target grid is padded by a fraction of the *span* of `mu`, not by a
+    fraction of `mu` itself. Scaling an endpoint multiplicatively only moves
+    it in the intended direction when that endpoint is positive: with a
+    negative minimum, `mu.min() * 0.9` is greater than `mu.min()`, and with a
+    negative maximum, `mu.max() * 0.98` is above the highest attainable
+    return, making every QP in the sweep infeasible.
 
     Returns
     -------
     (vols, rets, weights_list) as parallel arrays/list
     """
     n = len(mu)
-    targets = np.linspace(mu.min() * 0.9, mu.max() * 0.98, n_points)
+    lo, hi = float(np.min(mu)), float(np.max(mu))
+    span = hi - lo
+    if span <= 0:
+        targets = np.array([hi])
+    else:
+        targets = np.linspace(lo - 0.10 * span, hi - 0.02 * span, n_points)
     vols, rets, weights = [], [], []
     for target in targets:
         w = cp.Variable(n)

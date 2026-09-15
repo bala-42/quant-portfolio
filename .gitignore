@@ -1,4 +1,6 @@
-data/*.csv
+data/**
+!data/.gitkeep
+!data/README.md
 .ipynb_checkpoints/
 __pycache__/
 *.pyc

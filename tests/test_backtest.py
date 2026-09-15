@@ -80,3 +80,68 @@ def test_pairs_backtest_runs_and_returns_expected_keys():
                 "sharpe", "max_drawdown", "n_position_changes", "pct_time_in_market"]:
         assert key in result
     assert 0.0 <= result["pct_time_in_market"] <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for the pairs-backtest economics fixes.
+# ---------------------------------------------------------------------------
+
+def _synthetic_pair(beta=3.0, n=400, seed=11):
+    """A cointegrated log-price pair with a mean-reverting spread."""
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2020-01-01", periods=n, freq="D")
+    log_b = pd.Series(np.cumsum(rng.normal(0.0005, 0.02, n)) + 5.0, index=idx)
+    spread = np.zeros(n)
+    for i in range(1, n):
+        spread[i] = 0.90 * spread[i - 1] + rng.normal(0, 0.05)
+    log_a = pd.Series(beta * log_b.to_numpy() + spread + 2.0, index=idx)
+    return log_a, log_b, beta
+
+
+def test_pairs_backtest_returns_are_on_gross_notional_and_use_simple_returns():
+    log_a, log_b, beta = _synthetic_pair()
+    res = pairs_backtest(log_a, log_b, beta, window=30, cost_bps=0.0)
+    assert (res["position"] != 0).any(), "fixture never trades; test proves nothing"
+
+    gross = 1.0 + abs(beta)
+    ret_a = np.expm1(log_a.diff())
+    ret_b = np.expm1(log_b.diff())
+    expected = (res["position"].shift(1) * (ret_a - beta * ret_b) / gross).dropna()
+
+    pd.testing.assert_series_equal(res["returns"], expected, check_names=False)
+
+
+def test_pairs_backtest_does_not_compound_log_returns_as_simple_ones():
+    log_a, log_b, beta = _synthetic_pair()
+    res = pairs_backtest(log_a, log_b, beta, window=30, cost_bps=0.0)
+
+    gross = 1.0 + abs(beta)
+    log_version = (
+        res["position"].shift(1) * (log_a.diff() - beta * log_b.diff()) / gross
+    ).dropna()
+
+    # The pre-fix engine produced exactly `log_version`, then handed it to
+    # perf_stats, which compounds with (1 + r).prod().
+    assert not np.allclose(res["returns"].to_numpy(), log_version.to_numpy())
+
+
+def test_pairs_backtest_cost_scales_with_the_hedge_ratio_not_by_two():
+    log_a, log_b, beta = _synthetic_pair()
+    free = pairs_backtest(log_a, log_b, beta, window=30, cost_bps=0.0)
+    charged = pairs_backtest(log_a, log_b, beta, window=30, cost_bps=100.0)
+
+    drag = float((free["returns"] - charged["returns"]).sum())
+    turnover = float(
+        free["position"].diff().abs().fillna(0).reindex(free["returns"].index).fillna(0).sum()
+    )
+
+    # Returns are per unit of gross notional, so a round trip costs cost_bps
+    # on the position change -- not twice that, which is what `* 2` assumed
+    # and which is only right when the hedge ratio happens to be 1.
+    assert drag == pytest.approx(turnover * 100 / 1e4, rel=1e-9)
+
+
+def test_pairs_backtest_records_the_sharpe_convention():
+    log_a, log_b, beta = _synthetic_pair()
+    res = pairs_backtest(log_a, log_b, beta, window=30)
+    assert res["sharpe_convention"] == "arithmetic"

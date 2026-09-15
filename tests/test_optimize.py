@@ -65,3 +65,23 @@ def test_risk_parity_respects_custom_budget():
     rc = risk_contributions(w, cov)
     rc_pct = rc / rc.sum()
     np.testing.assert_allclose(rc_pct, budget, atol=1e-3)
+
+
+def test_efficient_frontier_handles_all_negative_expected_returns():
+    # Pre-fix the target grid was built by scaling mu's endpoints, which only
+    # moves them in the intended direction when they are positive. With a
+    # negative maximum, mu.max() * 0.98 sits ABOVE the highest attainable
+    # return and those QPs are infeasible, so the sweep silently returned
+    # fewer points than asked for.
+    mu = np.array([-0.05, -0.02, -0.10])
+    cov = np.array([[0.04, 0.01, 0.0], [0.01, 0.09, 0.02], [0.0, 0.02, 0.16]])
+    vols, rets, weights = efficient_frontier(mu, cov, n_points=15)
+    assert len(vols) == 15
+    assert np.all(np.diff(vols) >= -1e-6)
+
+
+def test_efficient_frontier_degenerate_when_all_returns_equal():
+    mu = np.array([0.07, 0.07, 0.07])
+    cov = np.diag([0.04, 0.01, 0.09])
+    vols, rets, weights = efficient_frontier(mu, cov, n_points=10)
+    assert len(vols) >= 1

@@ -30,7 +30,13 @@ def decile_backtest(signal: pd.DataFrame, fwd_returns: pd.DataFrame, n_deciles: 
     ----------
     signal      : DataFrame (date x asset) of the ranking signal
     fwd_returns : DataFrame (date x asset) of the return realized over the
-                  period immediately following each signal date
+                  period immediately following each signal date.
+
+                  NOTE: this alignment is the caller's responsibility and is
+                  not checked here. `fwd_returns.loc[date]` must be the
+                  return earned *after* `signal.loc[date]` was observable.
+                  Passing same-period returns produces a look-ahead result
+                  that looks excellent and is worthless.
     n_deciles   : number of groups to sort into
     min_names   : skip a date if fewer than this many names have a valid
                   signal (avoids noisy deciles early in a sample)
@@ -140,6 +146,7 @@ def pairs_backtest(
     stop_z: float = 3.5,
     cost_bps: float = 10.0,
     ann_factor: int = 365,
+    sharpe_convention: str = "arithmetic",
 ) -> dict:
     """
     Threshold mean-reversion backtest on the spread log_price_a - hedge_ratio * log_price_b.
@@ -148,6 +155,22 @@ def pairs_backtest(
     up), short when it rises above +entry_z, exit at +/-exit_z, and
     stop out beyond +/-stop_z. Net of a simple round-trip cost assumption
     charged on every position change (both legs).
+
+    Returns are expressed per unit of *gross* notional, i.e. per
+    (1 + |hedge_ratio|) of capital committed across the two legs, so
+    ann_return and max_drawdown are returns on capital rather than on an
+    unstated base.
+
+    LOOK-AHEAD WARNING. `hedge_ratio` is supplied by the caller and this
+    function cannot tell how it was estimated. Fitting it on the full sample
+    (e.g. from `cointegration_test` over the whole history) and then trading
+    it from day one means every trade uses a relationship measured partly
+    from its own future. The same applies to selecting *which* pair to trade
+    by scanning candidates over the full sample: the winner is chosen with
+    knowledge of the test period. Both are leakage at the parameter layer
+    even though every bar-level shift below is causal. A clean version fits
+    the hedge ratio on a rolling or expanding window and selects the pair
+    out-of-sample; this function does neither for you.
 
     Returns
     -------
@@ -182,17 +205,31 @@ def pairs_backtest(
         position[i] = pos
     position = pd.Series(position, index=zscore.index)
 
-    ret_a = aligned["a"].diff()
-    ret_b = aligned["b"].diff()
-    spread_ret = ret_a - hedge_ratio * ret_b
+    # The inputs are log prices, so a first difference is a log return.
+    # Feeding that straight into perf_stats compounds log returns as if they
+    # were simple ones -- a different quantity, and for crypto-sized daily
+    # moves a materially different one. Convert to simple returns first.
+    ret_a = np.expm1(aligned["a"].diff())
+    ret_b = np.expm1(aligned["b"].diff())
+
+    # One unit of A against hedge_ratio units of B commits (1 + |beta|) of
+    # gross notional, not 1. Normalising by it is what makes ann_return and
+    # max_drawdown returns on capital.
+    gross = 1.0 + abs(hedge_ratio)
+    spread_ret = (ret_a - hedge_ratio * ret_b) / gross
     strat_ret = position.shift(1) * spread_ret
 
+    # Both legs turn over on every position change, so traded notional is
+    # `gross` times the change in position; per unit of gross notional --
+    # the same base as spread_ret -- that is just cost_bps on the change.
+    # The previous `* 2` assumed two legs of equal size, true only when
+    # hedge_ratio == 1.
     trades = position.diff().abs().fillna(0)
-    cost = trades * (cost_bps / 1e4) * 2
+    cost = trades * (cost_bps / 1e4)
     net_ret = (strat_ret - cost.reindex(strat_ret.index).fillna(0)).dropna()
 
     from .stats import perf_stats
-    stats = perf_stats(net_ret, freq=ann_factor)
+    stats = perf_stats(net_ret, freq=ann_factor, sharpe_convention=sharpe_convention)
     stats["n_position_changes"] = int((trades > 0).sum())
     stats["pct_time_in_market"] = float((position != 0).mean())
 
