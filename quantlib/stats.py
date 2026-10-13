@@ -23,6 +23,14 @@ anything published anywhere else:
   producing NaN. ``(1 + r).prod()`` is zero or negative in that case, so
   the annualized return is either undefined or — with two such returns —
   *positive* through sign cancellation, which is worse than missing.
+
+Sharpe charges a strategy for large up-moves exactly as it does for large
+down-moves, so two strategies with the same Sharpe can carry very different
+crash risk. ``perf_stats`` therefore also reports the Sortino ratio, the
+downside deviation behind it, skewness, kurtosis and the Calmar ratio. For
+returns symmetric about the target, Sortino is sqrt(2) times Sharpe by
+construction; the ratio of the two, read next to ``skew``, is what carries
+information.
 """
 from __future__ import annotations
 
@@ -58,6 +66,62 @@ def max_drawdown(returns: pd.Series) -> float:
     return float(drawdown.min())
 
 
+def downside_deviation(returns: pd.Series, target: float = 0.0) -> float:
+    """
+    Per-period target semideviation: sqrt(mean(min(r - target, 0) ** 2)).
+
+    Two details separate this from the version that circulates in tutorials,
+    ``r[r < 0].std()``, and both matter:
+
+    - The shortfall is measured from ``target``, not from the mean of the
+      losing periods. Subtracting that mean measures how *spread out* the
+      losses are rather than how large they are; a strategy that loses
+      exactly 1% on every down day would score a downside deviation of zero.
+    - The mean runs over all N periods, with periods at or above target
+      contributing zero, not over the losing periods only.
+    """
+    r = returns.dropna().to_numpy(dtype=float)
+    if len(r) == 0:
+        return np.nan
+    shortfall = np.minimum(r - target, 0.0)
+    return float(np.sqrt(np.mean(shortfall ** 2)))
+
+
+def sortino_ratio(returns: pd.Series, freq: int, rf: float = 0.0) -> float:
+    """
+    Annualized Sortino ratio: sqrt(freq) * (mean(r) - tau) / downside_deviation(r, tau),
+    with the per-period target tau = rf / freq.
+
+    The numerator is the same arithmetic excess return as the default Sharpe,
+    so for returns symmetric about the target Sortino is sqrt(2) times Sharpe
+    automatically. Compare the two rather than reading Sortino alone: well
+    above sqrt(2) is skew in the strategy's favour, below it is downside the
+    Sharpe ratio does not show.
+
+    NaN when no period falls below the target. The ratio is then unbounded,
+    and an infinite Sortino is not a measurement of anything.
+    """
+    r = returns.dropna()
+    tau = rf / freq
+    dd = downside_deviation(r, tau)
+    if not dd > 0:
+        return np.nan
+    return float(np.sqrt(freq) * (r.mean() - tau) / dd)
+
+
+def _standardized_moments(r: pd.Series) -> tuple[float, float]:
+    """Population skewness and (non-excess) kurtosis; a normal is (0, 3)."""
+    x = r.to_numpy(dtype=float)
+    # A constant series has no shape to describe. Checked on the raw values:
+    # x - x.mean() is ~1e-18 rather than 0 there, and dividing by its cube
+    # returns a confident-looking number made of rounding error.
+    if len(x) == 0 or np.ptp(x) == 0:
+        return np.nan, np.nan
+    dev = x - x.mean()
+    sd = np.sqrt(np.mean(dev ** 2))
+    return float(np.mean(dev ** 3) / sd ** 3), float(np.mean(dev ** 4) / sd ** 4)
+
+
 def perf_stats(
     returns: pd.Series,
     freq: int,
@@ -81,8 +145,16 @@ def perf_stats(
 
     Returns
     -------
-    dict with ann_return, ann_vol, sharpe, sharpe_convention, max_drawdown,
-    hit_rate
+    dict with ann_return, ann_vol, sharpe, sharpe_convention, sortino,
+    ann_downside_dev, skew, kurtosis, max_drawdown, calmar, hit_rate.
+
+    ``sortino`` always uses the arithmetic numerator, whatever
+    ``sharpe_convention`` says, and targets ``rf / freq`` per period.
+    ``ann_downside_dev`` is annualized like ``ann_vol`` so the two compare
+    directly. ``kurtosis`` is not excess kurtosis: a normal scores 3.
+    ``calmar`` is ann_return / |max_drawdown|; it is only comparable between
+    samples of the same length, because the expected worst drawdown grows
+    with the length of the sample.
 
     Raises
     ------
@@ -111,12 +183,19 @@ def perf_stats(
         numerator = ann_return - rf
     sharpe = numerator / ann_vol if ann_vol > 0 else np.nan
 
+    mdd = max_drawdown(r)
+    skew, kurtosis = _standardized_moments(r)
     result = {
         "ann_return": ann_return,
         "ann_vol": ann_vol,
         "sharpe": sharpe,
         "sharpe_convention": sharpe_convention,
-        "max_drawdown": max_drawdown(r),
+        "sortino": sortino_ratio(r, freq=freq, rf=rf),
+        "ann_downside_dev": downside_deviation(r, rf / freq) * float(np.sqrt(freq)),
+        "skew": skew,
+        "kurtosis": kurtosis,
+        "max_drawdown": mdd,
+        "calmar": ann_return / abs(mdd) if mdd < 0 else np.nan,
         "hit_rate": float((r > 0).mean()),
     }
     if name is not None:
@@ -251,3 +330,16 @@ def sharpe_ci(
     result = bootstrap_ci(returns, _sharpe, **kwargs)
     result["sharpe_convention"] = sharpe_convention
     return result
+
+
+def sortino_ci(returns: pd.Series, freq: int, rf: float = 0.0, **kwargs) -> dict:
+    """
+    Bootstrap CI for the Sortino ratio.
+
+    Expect it to be wider than the Sharpe interval on the same series: only
+    the below-target periods carry information about the denominator. A
+    resample with no below-target period has no Sortino and counts toward
+    ``bootstrap_ci``'s failure limit, which is the honest outcome for a
+    series with very few losing periods.
+    """
+    return bootstrap_ci(returns, lambda r: sortino_ratio(r, freq=freq, rf=rf), **kwargs)

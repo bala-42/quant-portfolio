@@ -22,7 +22,7 @@ project got away with:
   [`quantlib/`](./quantlib) holds the decile-backtest engine, cointegration
   testing, pairs-trading backtest, performance statistics, bootstrap
   confidence intervals, and portfolio optimizers — used by every notebook,
-  covered by [35 unit tests](./tests) that check actual numerical
+  covered by [47 unit tests](./tests) that check actual numerical
   correctness (e.g., that the exact max-Sharpe solution beats every point
   on a 60-point frontier grid; that risk-parity weights produce genuinely
   equal risk contributions, not approximately equal ones).
@@ -138,6 +138,35 @@ fails cointegration and still loses money when traded anyway, Kupiec still
 rejects the normal-VaR calibration, and tangency still gives up far more
 out-of-sample than risk parity. The numbers moved; none of the conclusions did.
 
+## Downside risk: Sortino, skew, kurtosis, Calmar
+
+Sharpe charges a strategy for a large up-move exactly as it charges it for a
+large down-move, so two strategies with the same Sharpe can carry very
+different crash risk. `perf_stats` now also reports:
+
+| key | definition |
+|---|---|
+| `sortino` | sqrt(freq) * (mean(r) - tau) / DD, with tau = rf / freq |
+| `ann_downside_dev` | DD * sqrt(freq), where DD = sqrt(mean(min(r - tau, 0)^2)) over **all** N periods |
+| `skew`, `kurtosis` | population moments; a normal scores 0 and 3 (not excess kurtosis) |
+| `calmar` | ann_return / abs(max_drawdown); only comparable across equal-length samples |
+
+`sortino_ci` bootstraps the Sortino ratio the same way `sharpe_ci` does.
+
+Two details the tests pin down, because they are where implementations
+usually go wrong. The downside deviation is measured from the target, not
+from the mean of the losing periods: the common `r[r < 0].std()` gives a
+strategy that loses exactly 1% on every down day a downside deviation of
+zero. And for returns symmetric about the target, Sortino equals sqrt(2)
+times Sharpe by construction, so **the ratio between them is the informative
+number**, not either one alone.
+
+On the momentum long-short spread, Sortino is 0.52 against a Sharpe of 0.35,
+a ratio of 1.51 with skew of -0.15. That is close to the sqrt(2) a symmetric
+distribution would give, so the downside view adds no new warning here: the
+spread's losses are about as large as its gains. It is reported because a
+check that comes back clean is still a result.
+
 ## Known limitations
 
 Named here rather than left for a reader to find.
@@ -165,10 +194,10 @@ Named here rather than left for a reader to find.
 ```
 quant_portfolio/
 ├── quantlib/                       # shared, tested library
-│   ├── stats.py                    # perf_stats, bootstrap_ci, sharpe_ci
+│   ├── stats.py                    # perf_stats (incl. Sortino, skew, Calmar), bootstrap_ci, sharpe_ci, sortino_ci
 │   ├── backtest.py                 # decile_backtest, cointegration_test, pairs_backtest
 │   └── optimize.py                 # min_variance, max_sharpe, risk_parity (all convex/cvxpy)
-├── tests/                          # 35 unit tests covering quantlib
+├── tests/                          # 47 unit tests covering quantlib
 ├── requirements.txt                # pinned dependency versions
 ├── download_data.py                # fetches all source datasets into data/
 ├── 01_momentum_equities/
